@@ -1,29 +1,37 @@
+# Module docstring explaining Command Line Interface for Zwiggy Medallion Data Warehouse
 """Command Line Interface for Zwiggy Medallion Data Warehouse."""
 
+# Import argparse module for parsing command line arguments and flags
 import argparse
+# Import datetime module for parsing ISO format timestamp overrides
 from datetime import datetime
+# Import logging for operational log formatting
 import logging
+# Import sys module for stdout log stream handler
 import sys
 
+# Import batch close helper and database query connection utilities
 from zwiggy_dwh.batch import close_batch
 from zwiggy_dwh.db import fetch_all, warehouse_connection
 from zwiggy_dwh.init_db import init_warehouse
 from zwiggy_dwh.pipeline import run
 
+# Configure root logger format and output destination
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s - %(message)s",
     handlers=[logging.StreamHandler(sys.stdout)]
 )
+# Obtain CLI logger instance
 logger = logging.getLogger("zwiggy_dwh.cli")
 
-
+# Subcommand handler function for warehouse initialization ('init')
 def cmd_init(args):
     """Run warehouse initialization."""
     logger.info("Initializing Zwiggy Medallion Data Warehouse...")
     init_warehouse()
 
-
+# Subcommand handler function for executing pipeline pipeline run ('run')
 def cmd_run(args):
     """Run pipeline execution."""
     cutoff = datetime.fromisoformat(args.cutoff) if args.cutoff else None
@@ -37,6 +45,7 @@ def cmd_run(args):
         skip_gold=args.skip_gold
     )
 
+    # Print clean formatted text summary of pipeline run metrics
     print("\n" + "=" * 60)
     print(f"PIPELINE RUN SUMMARY (Batch ID: {report.batch_id})")
     print("=" * 60)
@@ -47,7 +56,7 @@ def cmd_run(args):
     print(f"Recon:     {len(report.recon_results)} checks executed")
     print("=" * 60 + "\n")
 
-
+# Subcommand handler displaying recent pipeline batches and watermarks ('status')
 def cmd_status(args):
     """Display latest pipeline run status and watermarks."""
     with warehouse_connection() as conn:
@@ -63,7 +72,7 @@ def cmd_status(args):
         print(f"Table: {w['source_table']:<25} | Watermark: {w['watermark_value']:<30} | Updated: {w['updated_ts_utc']}")
     print("")
 
-
+# Subcommand handler displaying Data Quality scorecard records ('scorecard')
 def cmd_scorecard(args):
     """Display latest Data Quality Scorecard."""
     with warehouse_connection() as conn:
@@ -74,16 +83,16 @@ def cmd_scorecard(args):
         print(f"[{r['verdict']:<4}] Rule: {r['rule_id']:<8} | Target: {r['target_object']:<20} | Failed: {r['rows_failed']}/{r['rows_evaluated']} ({r['failure_rate']:.2%}) | Severity: {r['severity']}")
     print("")
 
-
+# Main entrypoint configuring argparse subparsers and invoking command handlers
 def main():
     parser = argparse.ArgumentParser(description="Zwiggy Medallion Data Warehouse CLI")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    # Init
+    # Subparser for 'init' command
     parser_init = subparsers.add_parser("init", help="Initialize warehouse schemas and reference data")
     parser_init.set_defaults(func=cmd_init)
 
-    # Run
+    # Subparser for 'run' command
     parser_run = subparsers.add_parser("run", help="Execute pipeline run")
     parser_run.add_argument("--full", action="store_true", help="Force full reload mode")
     parser_run.add_argument("--replay", action="store_true", help="Replay transformation mode")
@@ -91,17 +100,19 @@ def main():
     parser_run.add_argument("--skip-gold", action="store_true", help="Skip Gold layer processing")
     parser_run.set_defaults(func=cmd_run)
 
-    # Status
+    # Subparser for 'status' command
     parser_status = subparsers.add_parser("status", help="Show recent run status and watermarks")
     parser_status.set_defaults(func=cmd_status)
 
-    # Scorecard
+    # Subparser for 'scorecard' command
     parser_scorecard = subparsers.add_parser("scorecard", help="Show DQ scorecard")
     parser_scorecard.set_defaults(func=cmd_scorecard)
 
+    # Parse command line arguments and execute assigned function
     args = parser.parse_args()
     args.func(args)
 
-
+# Execute main() if script is run directly from command line
 if __name__ == "__main__":
     main()
+

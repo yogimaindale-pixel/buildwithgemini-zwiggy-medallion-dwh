@@ -1,29 +1,35 @@
+# Module docstring explaining Data Quality Rule Engine
 """Data Quality Rule Engine."""
 
+# Import dataclass for structuring DQ result metrics
 from dataclasses import dataclass
+# Import logging module for operational logs
 import logging
+# Import List and Optional type hints
 from typing import List, Optional
 
+# Import batch step context manager and database query execution utilities
 from zwiggy_dwh.batch import Batch, step
 from zwiggy_dwh.db import execute_sql, fetch_all, fetch_one, fetch_scalar, warehouse_connection
 
+# Obtain logger instance for DQ engine events
 logger = logging.getLogger(__name__)
 
-
+# Dataclass holding evaluation result metrics for a single DQ rule
 @dataclass
 class DqResult:
     """Evaluation result for a single DQ rule."""
-    rule_id: str
-    target_object: str
-    rows_evaluated: int
-    rows_failed: int
-    failure_rate: float
-    threshold: Optional[float]
-    severity: str
-    verdict: str
-    details: str
+    rule_id: str # Unique rule identifier (e.g., 'DQ_CUST_001')
+    target_object: str # Target table or view name
+    rows_evaluated: int # Total count of evaluated records
+    rows_failed: int # Count of records failing the rule expression
+    failure_rate: float # Calculated failure ratio (rows_failed / rows_evaluated)
+    threshold: Optional[float] # Maximum acceptable failure rate threshold (e.g., 0.01)
+    severity: str # Rule severity level ('BLOCK' or 'WARN')
+    verdict: str # Evaluation verdict ('PASS' or 'FAIL')
+    details: str # Human-readable evaluation details string
 
-
+# Function evaluating a single active DQ rule against a target database table
 def evaluate_rule(conn, batch: Batch, rule: dict) -> DqResult:
     """Evaluate a single active DQ rule against target table/view in warehouse."""
     rule_id = rule["rule_id"]
@@ -36,7 +42,7 @@ def evaluate_rule(conn, batch: Batch, rule: dict) -> DqResult:
     full_table = f"{layer}.{target_object}"
 
     try:
-        # Check if table exists
+        # Check if target table exists in information schema before querying
         exists = fetch_scalar(
             conn,
             "SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = %s AND table_name = %s)",
@@ -55,7 +61,7 @@ def evaluate_rule(conn, batch: Batch, rule: dict) -> DqResult:
                 details=f"Target object {full_table} does not exist yet; skipped."
             )
 
-        # Count total rows
+        # Count total rows in target table
         total_rows = fetch_scalar(conn, f"SELECT COUNT(*) FROM {full_table}") or 0
 
         if total_rows == 0:
@@ -71,10 +77,11 @@ def evaluate_rule(conn, batch: Batch, rule: dict) -> DqResult:
                 details="Target table empty; 0 rows evaluated."
             )
 
-        # Count failing rows (TRUE = pass expression, FALSE/NULL = fail expression)
+        # Count failing rows (where expression evaluates to FALSE or NULL)
         failed_rows = fetch_scalar(conn, f"SELECT COUNT(*) FROM {full_table} WHERE NOT ({expr}) OR ({expr}) IS NULL") or 0
         failure_rate = float(failed_rows) / float(total_rows) if total_rows > 0 else 0.0
 
+        # Compare failure rate against configured threshold
         verdict = "PASS" if failure_rate <= threshold else "FAIL"
         details = f"Evaluated {total_rows} rows; {failed_rows} failed (failure rate {failure_rate:.4f}, threshold {threshold:.4f})."
 
@@ -104,7 +111,7 @@ def evaluate_rule(conn, batch: Batch, rule: dict) -> DqResult:
             details=f"Evaluation error: {e}"
         )
 
-
+# Function persisting DQ rule evaluation result into control audit table ctl.ctl_dq_result
 def record_result(conn, batch: Batch, res: DqResult) -> None:
     """Record DQ rule evaluation result into ctl_dq_result."""
     execute_sql(
@@ -123,7 +130,7 @@ def record_result(conn, batch: Batch, res: DqResult) -> None:
         )
     )
 
-
+# Master orchestrator function running all active DQ rules registered in silver.dq_rule
 def run_rules(batch: Batch) -> List[DqResult]:
     """Execute all active data quality rules for batch."""
     results = []
@@ -137,9 +144,10 @@ def run_rules(batch: Batch) -> List[DqResult]:
                 record_result(conn, batch, res)
                 results.append(res)
 
-    # Log summary
+    # Log summary of evaluated rules, failures, and blocking alerts
     failures = [r for r in results if r.verdict == "FAIL"]
     blocks = [r for r in failures if r.severity == "BLOCK"]
     logger.info("DQ Rule Evaluation completed: %d rules evaluated, %d failed (%d BLOCK severity)", len(results), len(failures), len(blocks))
 
     return results
+

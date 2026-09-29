@@ -1,15 +1,21 @@
+# Module docstring explaining Warehouse initialization script
 """Warehouse initialization script."""
 
+# Import date and timedelta for static date dimension generation
 from datetime import date, timedelta
+# Import logging for operational initialization logs
 import logging
+# Import Path class for object-oriented path handling
 from pathlib import Path
 
+# Import settings and database query execution helpers
 from zwiggy_dwh.config import settings
 from zwiggy_dwh.db import execute_sql, fetch_scalar, warehouse_connection
 
+# Obtain logger instance for warehouse init operations
 logger = logging.getLogger(__name__)
 
-
+# Function executing SQL script file against warehouse database
 def run_sql_file(file_path: Path) -> None:
     """Read and execute a SQL file against warehouse database."""
     logger.info("Executing SQL file: %s", file_path.name)
@@ -18,7 +24,7 @@ def run_sql_file(file_path: Path) -> None:
     with warehouse_connection() as conn:
         execute_sql(conn, sql)
 
-
+# Function seeding static date dimension gold.dim_date for years 2020 through 2030
 def seed_dim_date() -> None:
     """Populate dim_date dimension for 2020 through 2030 if empty."""
     with warehouse_connection() as conn:
@@ -52,7 +58,7 @@ def seed_dim_date() -> None:
             )
             curr += timedelta(days=1)
 
-
+# Function seeding static time dimension gold.dim_time for all 1440 minutes of day
 def seed_dim_time() -> None:
     """Populate dim_time dimension for all 1440 minutes of day if empty."""
     with warehouse_connection() as conn:
@@ -75,12 +81,13 @@ def seed_dim_time() -> None:
                     (time_sk, hour, minute)
                 )
 
-
+# Master function running full warehouse DDL creation, reference data seeding, and dimension setup
 def init_warehouse() -> None:
     """Run full warehouse initialization sequence."""
     s = settings()
     sql_base = s.sql_dir
 
+    # Ordered sequence of SQL initialization scripts
     sequence = [
         sql_base / "ctl" / "001_create_schemas.sql",
         sql_base / "ctl" / "002_ctl_tables.sql",
@@ -105,3 +112,4 @@ def init_warehouse() -> None:
     seed_dim_time()
 
     logger.info("✓ Warehouse initialization completed successfully.")
+

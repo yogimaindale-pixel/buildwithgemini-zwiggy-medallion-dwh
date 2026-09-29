@@ -1,24 +1,29 @@
+# Module docstring explaining Silver layer transformation and conforming engine
 """Silver layer transformation and conforming engine."""
 
+# Import logging module for operational logs
 import logging
+# Import Dict type hint for return data structures
 from typing import Dict
 
+# Import batch step logging wrapper and database connection/query execution helpers
 from zwiggy_dwh.batch import Batch, step
 from zwiggy_dwh.db import execute_sql, fetch_scalar, warehouse_connection
 
+# Obtain logger instance for Silver layer events
 logger = logging.getLogger(__name__)
 
-
+# Function transforming raw br_customer into cleansed slv_customer and quarantining invalid records
 def load_slv_customer(batch: Batch) -> dict:
     """Transform br_customer into slv_customer and quarantine invalid records."""
     sql = """
-    -- Quarantine missing customer_id
+    -- 1. Quarantine records missing required primary key customer_id
     INSERT INTO silver.slv_customer_quarantine (dw_batch_id, dw_quarantine_reason, dw_raw_payload)
     SELECT dw_batch_id, 'Missing customer_id', row_to_json(b)::jsonb
     FROM bronze.br_customer b
     WHERE dw_batch_id = %s AND (customer_id IS NULL OR customer_id = '');
 
-    -- Load valid slv_customer
+    -- 2. Cleanse, mask PII, type-cast, and upsert valid records into slv_customer
     INSERT INTO silver.slv_customer (customer_id, name, email_masked, phone_masked, created_at, updated_at, dw_batch_id)
     SELECT
         customer_id::bigint,
@@ -43,7 +48,7 @@ def load_slv_customer(batch: Batch) -> dict:
         quarantined = fetch_scalar(conn, "SELECT COUNT(*) FROM silver.slv_customer_quarantine WHERE dw_batch_id = %s", (batch.batch_id,)) or 0
         return {"written": written, "quarantined": quarantined}
 
-
+# Function transforming raw br_restaurant into cleansed slv_restaurant table
 def load_slv_restaurant(batch: Batch) -> dict:
     """Transform br_restaurant into slv_restaurant."""
     sql = """
@@ -72,17 +77,17 @@ def load_slv_restaurant(batch: Batch) -> dict:
         written = fetch_scalar(conn, "SELECT COUNT(*) FROM silver.slv_restaurant WHERE dw_batch_id = %s", (batch.batch_id,)) or 0
         return {"written": written, "quarantined": 0}
 
-
+# Function transforming raw br_order_header into cleansed slv_order table with status normalization & cohort mapping
 def load_slv_order(batch: Batch) -> dict:
     """Transform br_order into slv_order with status conformance and cohort rule mapping."""
     sql = """
-    -- Quarantine missing order_id
+    -- 1. Quarantine records missing primary key order_id
     INSERT INTO silver.slv_order_quarantine (dw_batch_id, dw_quarantine_reason, dw_raw_payload)
     SELECT dw_batch_id, 'Missing order_id', row_to_json(b)::jsonb
     FROM bronze.br_order_header b
     WHERE dw_batch_id = %s AND (order_id IS NULL OR order_id = '');
 
-    -- Load valid slv_order
+    -- 2. Cleanse, conform order status to uppercase, map business cohort, and upsert valid orders
     INSERT INTO silver.slv_order (
         order_id, customer_id, restaurant_id, order_status, total_amount,
         discount_amount, delivery_fee, cohort_id, created_at, updated_at, dw_batch_id
@@ -118,7 +123,7 @@ def load_slv_order(batch: Batch) -> dict:
         quarantined = fetch_scalar(conn, "SELECT COUNT(*) FROM silver.slv_order_quarantine WHERE dw_batch_id = %s", (batch.batch_id,)) or 0
         return {"written": written, "quarantined": quarantined}
 
-
+# Function transforming raw br_order_payment into slv_payment using ref_payment_method_map reference lookup
 def load_slv_payment(batch: Batch) -> dict:
     """Transform br_order_payment into slv_payment using ref_payment_method_map."""
     sql = """
@@ -147,11 +152,12 @@ def load_slv_payment(batch: Batch) -> dict:
         written = fetch_scalar(conn, "SELECT COUNT(*) FROM silver.slv_payment WHERE dw_batch_id = %s", (batch.batch_id,)) or 0
         return {"written": written, "quarantined": 0}
 
-
+# Master orchestrator function running Silver layer transformations for all entities
 def run_silver(batch: Batch) -> Dict[str, dict]:
     """Orchestrate Silver layer transformations for all entities."""
     results = {}
 
+    # List of Silver entity loaders to run sequentially
     loaders = [
         ("slv_customer", load_slv_customer),
         ("slv_restaurant", load_slv_restaurant),
@@ -159,6 +165,7 @@ def run_silver(batch: Batch) -> Dict[str, dict]:
         ("slv_payment", load_slv_payment),
     ]
 
+    # Iterate through loaders and execute step
     for name, fn in loaders:
         with step(batch, "silver_load", name) as res:
             out = fn(batch)
@@ -167,3 +174,4 @@ def run_silver(batch: Batch) -> Dict[str, dict]:
             results[name] = out
 
     return results
+

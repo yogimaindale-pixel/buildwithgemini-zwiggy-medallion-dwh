@@ -1,27 +1,33 @@
+# Module docstring explaining Reconciliation Suite (RC-1 through RC-10)
 """Reconciliation Suite (RC-1 through RC-10)."""
 
+# Import dataclass for structuring reconciliation check results
 from dataclasses import dataclass
+# Import logging module for operational execution logs
 import logging
+# Import List and Optional type hints
 from typing import List, Optional
 
+# Import batch step wrapper and database connection/query execution helpers
 from zwiggy_dwh.batch import Batch, step
 from zwiggy_dwh.db import execute_sql, fetch_scalar, warehouse_connection
 
+# Obtain logger instance for reconciliation events
 logger = logging.getLogger(__name__)
 
-
+# Dataclass storing details and metrics of a single reconciliation check
 @dataclass
 class ReconCheck:
     """Result of a reconciliation check."""
-    check_id: str
-    check_name: str
-    expected_value: Optional[float]
-    actual_value: Optional[float]
-    variance: Optional[float]
-    verdict: str  # PASS, FAIL, SKIP
-    details: str
+    check_id: str # Check code (e.g., 'RC-1', 'RC-2')
+    check_name: str # Descriptive name of reconciliation check
+    expected_value: Optional[float] # Expected benchmark numerical value
+    actual_value: Optional[float] # Measured actual numerical value
+    variance: Optional[float] # Difference between expected and actual
+    verdict: str # Reconciliation verdict ('PASS', 'FAIL', 'SKIP')
+    details: str # Detailed explanation message string
 
-
+# Check RC-1: Verify source extract row count matches Bronze landed row count
 def run_rc1(conn, batch: Batch) -> ReconCheck:
     """RC-1: Extract row count equals Bronze landed row count."""
     extracted = fetch_scalar(
@@ -55,7 +61,7 @@ def run_rc1(conn, batch: Batch) -> ReconCheck:
         details=f"Extracted {extracted} rows vs Bronze {bronze_rows} rows landed."
     )
 
-
+# Check RC-2: Verify Bronze landed rows are fully accounted for in Silver (loaded + quarantined >= bronze)
 def run_rc2(conn, batch: Batch) -> ReconCheck:
     """RC-2: Bronze rows accounted for in Silver (loaded + quarantined >= bronze)."""
     bronze_cnt = fetch_scalar(
@@ -90,7 +96,7 @@ def run_rc2(conn, batch: Batch) -> ReconCheck:
         details=f"Bronze customer rows {bronze_cnt} vs Accounted (Silver {slv_cnt} + Quarantine {quar_cnt} = {accounted})."
     )
 
-
+# Check RC-3: Verify Silver order count equals Gold Fact order count for current batch
 def run_rc3(conn, batch: Batch) -> ReconCheck:
     """RC-3: Silver order count equals Fact order count for current batch."""
     slv_cnt = fetch_scalar(
@@ -118,7 +124,7 @@ def run_rc3(conn, batch: Batch) -> ReconCheck:
         details=f"Silver orders {slv_cnt} vs Fact orders {fact_cnt}."
     )
 
-
+# Check RC-6: Verify Fact foreign key resolution rate (unknown customer_sk=-1 share must be <= 5%)
 def run_rc6(conn, batch: Batch) -> ReconCheck:
     """RC-6: Fact foreign key resolution threshold (unknown customer_sk=-1 share <= 5%)."""
     total_facts = fetch_scalar(
@@ -157,7 +163,7 @@ def run_rc6(conn, batch: Batch) -> ReconCheck:
         details=f"Unknown SK count: {unknown_facts} / {total_facts} ({unknown_share:.2%} share, threshold <= 5%)."
     )
 
-
+# Check RC-7: Verify Fact order primary key uniqueness at order_id grain
 def run_rc7(conn, batch: Batch) -> ReconCheck:
     """RC-7: Fact order uniqueness at order_id grain."""
     dup_cnt = fetch_scalar(
@@ -182,7 +188,7 @@ def run_rc7(conn, batch: Batch) -> ReconCheck:
         details=f"Duplicate order_ids in fact_order for batch: {dup_cnt}."
     )
 
-
+# Check RC-8: Verify SCD2 non-overlapping date range integrity across version records in dim_customer
 def run_rc8(conn, batch: Batch) -> ReconCheck:
     """RC-8: SCD2 non-overlapping date range integrity."""
     overlap_cnt = fetch_scalar(
@@ -207,7 +213,7 @@ def run_rc8(conn, batch: Batch) -> ReconCheck:
         details=f"Overlapping SCD2 ranges detected in dim_customer: {overlap_cnt}."
     )
 
-
+# Check RC-9: Verify Gold aggregate mart daily summary order count matches total Fact order count
 def run_rc9(conn, batch: Batch) -> ReconCheck:
     """RC-9: Mart daily summary order count matches fact order count."""
     fact_total = fetch_scalar(conn, "SELECT COUNT(*) FROM gold.fact_order") or 0
@@ -226,7 +232,7 @@ def run_rc9(conn, batch: Batch) -> ReconCheck:
         details=f"Fact total orders {fact_total} vs Mart aggregate orders {mart_total}."
     )
 
-
+# Check RC-10: Verify Gold layer data freshness timestamp presence
 def run_rc10(conn, batch: Batch) -> ReconCheck:
     """RC-10: Gold freshness timestamp check."""
     max_gold_ts = fetch_scalar(conn, "SELECT MAX(dw_ingest_ts_utc) FROM gold.fact_order")
@@ -243,7 +249,7 @@ def run_rc10(conn, batch: Batch) -> ReconCheck:
         details=f"Latest Gold fact timestamp: {max_gold_ts}."
     )
 
-
+# Function inserting reconciliation check result into control audit table ctl.ctl_reconciliation
 def record_recon(conn, batch: Batch, check: ReconCheck) -> None:
     """Record reconciliation result into ctl_reconciliation."""
     execute_sql(
@@ -260,7 +266,7 @@ def record_recon(conn, batch: Batch, check: ReconCheck) -> None:
         )
     )
 
-
+# Master orchestrator function running the entire reconciliation suite
 def run_reconciliation(batch: Batch) -> List[ReconCheck]:
     """Execute complete reconciliation suite (RC-1 through RC-10)."""
     checks = [
@@ -279,3 +285,4 @@ def run_reconciliation(batch: Batch) -> List[ReconCheck]:
     logger.info("Reconciliation completed: %d checks executed, %d failed", len(results), len(failures))
 
     return results
+
